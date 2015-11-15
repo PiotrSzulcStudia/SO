@@ -1,3 +1,4 @@
+/* Piotr Szulc ps347277 */
 
 #include <stdio.h>
 #include <stdlib.h>
