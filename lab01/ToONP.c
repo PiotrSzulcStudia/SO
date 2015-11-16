@@ -32,6 +32,7 @@ int main(int argc, char** argv)
 	strcpy(buffer, argv[1]);
 
 	spawn_worker(buffer, "", "");
+	printf("\n");
 
 	return 0;
 }
