@@ -68,9 +68,14 @@ int main(int argc, char** argv)
 	bool add_to_stack = false;
 	switch (input[0])
 	{
-		case '+':
 		case '-':
-			/* only unsigned integers */
+			/* special case with negative numbers */
+			if ((strlen(input) > 1) && (!isspace(input[1])))
+			{
+				write_to_result(result, input[0]);
+				break;
+			}
+		case '+':
 			while(stack_pos < strlen(stack))
 			{
 				add_to_stack = false;
