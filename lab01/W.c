@@ -18,6 +18,8 @@
 	static const bool debug = false;
 #endif
 
+int op_priority(char op);
+void add_space_to_result(char* result);
 void write_to_result(char* result, const char str);
 void write_to_stack(char* stack, const char op, int *stack_pos);
 char *str_dup (const char *s);
@@ -65,38 +67,26 @@ int main(int argc, char** argv)
 			getpid(), input[0], stack, result
 		);
 
-	bool add_to_stack = false;
 	switch (input[0])
 	{
-		case '-':
-			/* special case with negative numbers */
-			if ((strlen(input) > 1) && (!isspace(input[1])))
-			{
-				write_to_result(result, input[0]);
-				break;
-			}
-		case '+':
-			while(stack_pos < strlen(stack))
-			{
-				add_to_stack = false;
-				if(stack[stack_pos] != '(')
-					add_to_stack = true;
+		case '-': /* Odp.: Przez liczbę całkowitą należy rozumież liczbę całkowitą bez znaku */
+		case '^':
 		case '*':
 		case '/':
-		case '^':
-				if ((stack[stack_pos] == '*') ||
-					(stack[stack_pos] == '/') ||
-					(stack[stack_pos] == '^') ||
-					add_to_stack
-				)
+		case '+':
+			while (stack_pos < strlen(stack))
+			{
+				/* treating every op as left-associative */
+				if (op_priority(input[0]) <= op_priority(stack[stack_pos]))
 				{
 					write_to_result(result, ' ');
-					write_to_result(result, stack[stack_pos]);
-					stack_pos++;
+					write_to_result(result, stack[stack_pos++]);
 				}
-					else break;
+				else break;
 			}
+
 			write_to_result(result, ' ');
+
 		case '(':
 			write_to_stack(stack, input[0], &stack_pos);
 			break;
@@ -118,6 +108,7 @@ int main(int argc, char** argv)
 		case '\n':
 			break;
 		default:
+			add_space_to_result(result);
 			/*
 			 * We only checked first character of expression (input[0])
 			 * Now let's check if there are other characters in expression
@@ -146,6 +137,24 @@ int main(int argc, char** argv)
 	spawn_worker(input + input_pos, stack + stack_pos, result);
 
 	return 0;
+}
+
+void add_space_to_result(char* result)
+{
+	if ((strlen(result) > 0) && (!isspace(result[strlen(result) - 1])))
+		write_to_result(result, ' ');
+}
+
+int op_priority(char op)
+{
+	switch (op)
+	{
+		case '^': return 2;
+		case '*':
+		case '/': return 1;
+		case '(': return -1;
+		default: return 0;
+	}
 }
 
 char *str_dup (const char *s)
