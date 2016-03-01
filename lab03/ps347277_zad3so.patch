@@ -1,0 +1,934 @@
+From c99ccab291c695494064311442a508381809ed53 Mon Sep 17 00:00:00 2001
+From: Piotr Szulc <kkragoth@gmail.com>
+Date: Mon, 18 Jan 2016 19:33:30 +0000
+Subject: [PATCH 1/6] Zadanie SzulcPiotr Nie wiem czy wszystko
+
+---
+ include/minix/com.h             |   11 ++
+ include/proc_sem.h              |    8 ++
+ lib/libc/sys-minix/Makefile.inc |    3 +-
+ lib/libc/sys-minix/proc_sem.c   |   66 +++++++++++
+ servers/ipc/Makefile            |    2 +-
+ servers/ipc/inc.h               |    5 +
+ servers/ipc/main.c              |    5 +
+ servers/ipc/proc_sem.c          |  239 +++++++++++++++++++++++++++++++++++++++
+ servers/pm/forkexit.c           |   58 ++++++++++
+ servers/pm/getset.c             |   17 +++
+ servers/pm/main.c               |    1 +
+ servers/pm/mproc.h              |    2 +
+ servers/pm/proto.h              |    1 +
+ servers/pm/table.c              |    2 +-
+ 14 files changed, 417 insertions(+), 3 deletions(-)
+ create mode 100644 include/proc_sem.h
+ create mode 100644 lib/libc/sys-minix/proc_sem.c
+ create mode 100644 servers/ipc/proc_sem.c
+
+diff --git a/include/minix/com.h b/include/minix/com.h
+index 7d57e7b..0abf43f 100644
+--- a/include/minix/com.h
++++ b/include/minix/com.h
+@@ -1127,6 +1127,17 @@
+ #	define SEMOP_ID		m2_i1
+ #	define SEMOP_OPS	m2_l1
+ #	define SEMOP_SIZE	m2_i2
++#define IPC_PROC_SEMINIT (IPC_BASE+8)
++#       define PROC_SEMINIT_KEY m2_i1
++#define IPC_PROC_SEMPOST (IPC_BASE+9)
++#       define PROC_SEMPOST_KEY m2_i1
++#define IPC_PROC_SEMWAIT (IPC_BASE+10)
++#       define PROC_SEMWAIT_KEY m2_i1
++#define IPC_PROC_ENTER 	(IPC_BASE+11)
++#	define PROC_ENTER_KEY m2_i1
++#define IPC_PROC_LEAVE	(IPC_BASE+12)
++#	define PROC_LEAVE_KEY m2_i1
++#	define PROC_LEAVE_ENDPOINT m2_i2
+ 
+ /*===========================================================================*
+  *                Messages for Scheduling				     *
+diff --git a/include/proc_sem.h b/include/proc_sem.h
+new file mode 100644
+index 0000000..c370c02
+--- /dev/null
++++ b/include/proc_sem.h
+@@ -0,0 +1,8 @@
++#ifndef PROC_SEM__
++#define PROC_SEM__
++
++int proc_sem_init(size_t n);
++void proc_sem_post(size_t sem_nr);
++void proc_sem_wait(size_t sem_nr);
++
++#endif
+diff --git a/lib/libc/sys-minix/Makefile.inc b/lib/libc/sys-minix/Makefile.inc
+index 6f52097..51af32f 100644
+--- a/lib/libc/sys-minix/Makefile.inc
++++ b/lib/libc/sys-minix/Makefile.inc
+@@ -16,7 +16,8 @@ SRCS+= 	accept.c access.c bind.c brk.c sbrk.c m_closefrom.c getsid.c \
+ 	vectorio.c shutdown.c sigaction.c sigpending.c sigreturn.c sigsuspend.c\
+ 	sigprocmask.c socket.c socketpair.c stat.c statvfs.c symlink.c \
+ 	sync.c syscall.c sysuname.c truncate.c umask.c unlink.c write.c \
+-	_exit.c _ucontext.c environ.c __getcwd.c vfork.c sizeup.c init.c
++	_exit.c _ucontext.c environ.c __getcwd.c vfork.c sizeup.c init.c \
++	proc_sem.c
+ 
+ # Minix specific syscalls.
+ SRCS+= cprofile.c lseek64.c sprofile.c _mcontext.c
+diff --git a/lib/libc/sys-minix/proc_sem.c b/lib/libc/sys-minix/proc_sem.c
+new file mode 100644
+index 0000000..e86b11a
+--- /dev/null
++++ b/lib/libc/sys-minix/proc_sem.c
+@@ -0,0 +1,66 @@
++#define _SYSTEM 1
++#define _MINIX 1
++
++
++#include <sys/cdefs.h>
++#include <lib.h>
++
++#include <minix/rs.h>
++
++#include <lib.h>
++#include <sys/types.h>
++#include <sys/ipc.h>
++#include <stdlib.h>
++#include <unistd.h>
++#include <errno.h>
++
++static int get_ipc_endpt(endpoint_t *pt)
++{
++    	return minix_rs_lookup("ipc", pt);
++}
++
++int proc_sem_init(size_t n) 
++{
++	message m;
++	endpoint_t ipc_pt;
++
++	if (get_ipc_endpt(&ipc_pt) != OK)
++	{
++	    	errno = ENOSYS;
++	  	return -1;
++	}
++
++	m.PROC_SEMINIT_KEY = n;
++
++	return (_syscall(ipc_pt, IPC_PROC_SEMINIT, &m));
++}
++
++void proc_sem_post(size_t sem_nr) 
++{
++	message m;
++	endpoint_t ipc_pt;
++
++/*
++	if (get_ipc_endpt(&ipc_pt) != OK)
++	{
++	    	errno = ENOSYS;
++	  	return -1;
++	}
++*/
++	get_ipc_endpt(&ipc_pt);
++	m.PROC_SEMPOST_KEY = sem_nr;
++
++	_syscall(ipc_pt, IPC_PROC_SEMPOST, &m);
++}
++
++void proc_sem_wait(size_t sem_nr) 
++{
++	message m;
++	endpoint_t ipc_pt;
++
++
++	get_ipc_endpt(&ipc_pt);
++	m.PROC_SEMWAIT_KEY = sem_nr;
++
++	_syscall(ipc_pt, IPC_PROC_SEMWAIT, &m);
++}
+diff --git a/servers/ipc/Makefile b/servers/ipc/Makefile
+index ccda5f1..c4422f9 100644
+--- a/servers/ipc/Makefile
++++ b/servers/ipc/Makefile
+@@ -1,6 +1,6 @@
+ # Makefile for IPC server
+ PROG=	ipc
+-SRCS=	main.c utility.c shm.c sem.c
++SRCS=	main.c utility.c shm.c sem.c proc_sem.c
+ 
+ DPADD+=	${LIBSYS}
+ LDADD+=	-lsys
+diff --git a/servers/ipc/inc.h b/servers/ipc/inc.h
+index e3e1dc8..78c67f8 100644
+--- a/servers/ipc/inc.h
++++ b/servers/ipc/inc.h
+@@ -38,6 +38,11 @@ void update_refcount_and_destroy(void);
+ int do_semget(message *);
+ int do_semctl(message *);
+ int do_semop(message *);
++int do_proc_seminit(message *);
++int do_proc_sempost(message *);
++int do_proc_semwait(message *);
++int do_proc_enter(message *);
++int do_proc_leave(message *);
+ int is_sem_nil(void);
+ int is_shm_nil(void);
+ void sem_process_vm_notify(void);
+diff --git a/servers/ipc/main.c b/servers/ipc/main.c
+index de371e5..ccd8605 100644
+--- a/servers/ipc/main.c
++++ b/servers/ipc/main.c
+@@ -17,6 +17,11 @@ static struct {
+ 	{ IPC_SEMGET,	do_semget,	0 },
+ 	{ IPC_SEMCTL,	do_semctl,	0 },
+ 	{ IPC_SEMOP,	do_semop,	1 },
++	{ IPC_PROC_SEMINIT, do_proc_seminit, 0},
++	{ IPC_PROC_SEMPOST, do_proc_sempost, 0},
++	{ IPC_PROC_SEMWAIT, do_proc_semwait, 1},
++	{ IPC_PROC_ENTER, do_proc_enter, 0},
++	{ IPC_PROC_LEAVE, do_proc_leave, 0},
+ };
+ 
+ #define SIZE(a) (sizeof(a)/sizeof(a[0]))
+diff --git a/servers/ipc/proc_sem.c b/servers/ipc/proc_sem.c
+new file mode 100644
+index 0000000..acdb06f
+--- /dev/null
++++ b/servers/ipc/proc_sem.c
+@@ -0,0 +1,239 @@
++#include <minix/vm.h>
++#include "inc.h"
++
++#include <lib.h>
++
++#define PROC_SEM  256
++#define PROC_SEM_SETS 256
++
++#include <minix/callnr.h>
++#include <minix/com.h>
++#include <minix/config.h>
++#include <minix/ipc.h>
++#include <minix/endpoint.h>
++#include <minix/sysutil.h>
++#include <minix/syslib.h>
++#include <minix/const.h>
++#include <minix/type.h>
++#include <minix/ds.h>
++
++#include <stdio.h>
++#include <stdlib.h>
++#include <errno.h>
++#include <string.h>
++#include <lib.h>
++
++struct proc_semaphore {
++        unsigned short semval;
++        pid_t sempid;
++        int waiting_count;
++        int i; /* used for waking up in round robin */
++        int j; /* used for putting to sleep in round robin */
++        endpoint_t waiting[PROC_SEM];
++};
++
++struct proc_sem_set {
++        int sem_count;  /* # semaphores in set */
++        int proc_using; /* # processes using set */
++        struct proc_semaphore sem[PROC_SEM];
++};
++
++static struct proc_sem_set proc_sem_list[PROC_SEM_SETS];
++
++static int minix_rs_lookup(const char *name, endpoint_t *value)
++{
++        message m;
++        size_t len_key;
++
++        len_key = strlen(name)+1;
++
++        m.RS_NAME = (char *) name;
++        m.RS_NAME_LEN = len_key;
++
++        if (_syscall(RS_PROC_NR, RS_LOOKUP, &m) != -1) {
++                *value = m.RS_ENDPOINT;
++                return OK;
++        }
++
++        return -1;
++}
++
++/* set_id == -1 doesnt change process set id */
++static int resolve_set_id(int source, int sem_set_id)
++{
++        message mpm;
++        mpm.m1_i1 = source;
++        mpm.m1_i2 = sem_set_id;
++        endpoint_t pm_ep;
++        minix_rs_lookup("pm", &pm_ep);
++        _syscall(pm_ep, 69, &mpm);
++
++        return mpm.m1_i1;
++}
++
++int do_proc_enter(message *m)
++{
++        int sem_set_id = m->PROC_ENTER_KEY;
++#ifdef PROC_DEBUG
++        printf("PROC::new proces starts using sem id: %d\n", sem_set_id);
++#endif
++        proc_sem_list[sem_set_id].proc_using++;
++        return (OK);
++}
++
++int do_proc_leave(message *m)
++{
++        int sem_set_id = m->PROC_LEAVE_KEY;
++        endpoint_t proc_endpoint = m->PROC_LEAVE_ENDPOINT;
++#ifdef PROC_DEBUG
++        printf("PROC::proces leaves sem id: %d\n", sem_set_id);
++#endif
++        proc_sem_list[sem_set_id].proc_using--;
++
++        /* removing process from any waiting queue in his set */
++        for (int i = 0; i < proc_sem_list[sem_set_id].sem_count; i++)
++        {
++                for (int j = 0; j < PROC_SEM; j++)
++                {
++                        if (proc_sem_list[sem_set_id].sem[i].waiting[j] == proc_endpoint)
++                        {
++                                /* fix: wake up process ? */
++                                proc_sem_list[sem_set_id].sem[i].waiting[j] = 0;
++                                proc_sem_list[sem_set_id].sem[i].waiting_count--;
++
++                                printf("Removed from waiting queue\n");
++                        }
++                }
++        }
++        return (OK);
++}
++
++int do_proc_seminit(message *m)
++{
++#ifdef PROC_DEBUG
++        printf("PROC_SEM::init\n");
++        printf("m_source:: %d\n", m->m_source);
++        printf("m_value:: %d\n", m->PROC_SEMINIT_KEY);
++#endif
++
++        if (m->PROC_SEMINIT_KEY >= PROC_SEM)
++                return ENOMEM;
++
++        int sem_set_id = 0;
++        for (; sem_set_id < PROC_SEM_SETS; sem_set_id++)
++        {
++                if (proc_sem_list[sem_set_id].proc_using == 0)
++                        break;
++        }
++
++        int previous = resolve_set_id(m->m_source, sem_set_id);
++
++        if (previous != -1)
++        {
++                proc_sem_list[previous].proc_using--;
++        }
++
++        proc_sem_list[sem_set_id].proc_using = 1;
++        proc_sem_list[sem_set_id].sem_count = m->PROC_SEMINIT_KEY;
++
++        for (int i = 0; i < proc_sem_list[sem_set_id].sem_count; i++)
++        {
++                proc_sem_list[sem_set_id].sem[i].semval = 0;
++                proc_sem_list[sem_set_id].sem[i].waiting_count = 0;
++                for (int j = 0; j < PROC_SEM; j++)
++                {
++                        proc_sem_list[sem_set_id].sem[i].waiting[j] = 0;
++                        proc_sem_list[sem_set_id].sem[i].i = 0;
++                        proc_sem_list[sem_set_id].sem[i].j = 0;
++                }
++        }
++
++        return OK;
++}
++
++int do_proc_sempost(message *m)
++{
++#ifdef PROC_DEBUG
++        printf("PROC_SEM::post\n");
++#endif
++
++        int sem_set_id = resolve_set_id(m->m_source, -1);
++        int sem_id = m->PROC_SEMPOST_KEY;
++
++        if ((sem_id < 0) || (sem_id >= proc_sem_list[sem_set_id].sem_count))
++                return OK;
++
++#ifdef PROC_DEBUG
++        printf("SEM_SET_ID: %d\n SEM_ID: %d\n", sem_set_id, sem_id);
++#endif
++        if (proc_sem_list[sem_set_id].sem[sem_id].waiting_count > 0)
++        {
++                int i = proc_sem_list[sem_set_id].sem[sem_id].i;
++                while (1)
++                {
++                        if (proc_sem_list[sem_set_id].sem[sem_id].waiting[i] != 0)
++                        {
++                                break;
++                        }
++                        i = (i+1) % PROC_SEM;
++                }
++
++                proc_sem_list[sem_set_id].sem[sem_id].i = i;
++                endpoint_t waking= proc_sem_list[sem_set_id].sem[sem_id].waiting[i];
++                proc_sem_list[sem_set_id].sem[sem_id].waiting[i] = 0;
++                proc_sem_list[sem_set_id].sem[sem_id].waiting_count--;
++
++#ifdef PROC_DEBUG
++                printf("Waking up: %d\n", waking);
++#endif
++                message reply;
++                reply.m_type = OK;
++                sendnb(waking, &reply);
++
++        }
++        else
++        {
++                proc_sem_list[sem_set_id].sem[sem_id].semval++;
++#ifdef PROC_DEBUG
++                printf("sem::post: %d \n", proc_sem_list[sem_set_id].sem[sem_id].semval);
++#endif
++        }
++        return OK;
++}
++
++int do_proc_semwait(message *m)
++{
++#ifdef PROC_DEBUG
++        printf("PROC_SEM::wait\n");
++#endif
++
++        int sem_set_id = resolve_set_id(m->m_source, -1);
++        int sem_id = m->PROC_SEMWAIT_KEY;
++
++        if ((sem_id < 0) || (sem_id >= proc_sem_list[sem_set_id].sem_count))
++                return OK;
++#ifdef PROC_DEBUG
++        printf("SEM_SET_ID: %d\n SEM_ID: %d\n", sem_set_id, sem_id);
++        printf("SEM_VAL: %d\n", proc_sem_list[sem_set_id].sem[sem_id].semval);
++#endif
++        if (proc_sem_list[sem_set_id].sem[sem_id].semval > 0)
++        {
++                proc_sem_list[sem_set_id].sem[sem_id].semval--;
++                message reply;
++                reply.m_type = OK;
++                sendnb(m->m_source, &reply);
++        }
++        else {
++                proc_sem_list[sem_set_id].sem[sem_id].waiting_count++;
++                int j = proc_sem_list[sem_set_id].sem[sem_id].j;
++                while (proc_sem_list[sem_set_id].sem[sem_id].waiting[j] != 0)
++                {
++                        j = (j + 1) % PROC_SEM;
++                }
++                proc_sem_list[sem_set_id].sem[sem_id].j = j;
++                proc_sem_list[sem_set_id].sem[sem_id].waiting[j] = m->m_source;
++
++        }
++
++        return OK;
++}
+diff --git a/servers/pm/forkexit.c b/servers/pm/forkexit.c
+index 6e01f41..91f7af4 100644
+--- a/servers/pm/forkexit.c
++++ b/servers/pm/forkexit.c
+@@ -29,7 +29,12 @@
+ #include "mproc.h"
+ #include "param.h"
+ 
++#include <stdio.h>
++#include <string.h>
++#include <lib.h>
++
+ #define LAST_FEW            2	/* last few slots reserved for superuser */
++#define PROC_CLEANUP
+ 
+ static void zombify(struct mproc *rmp);
+ static void check_parent(struct mproc *child, int try_cleanup);
+@@ -38,6 +43,51 @@ static void tell_tracer(struct mproc *child);
+ static void tracer_died(struct mproc *child);
+ static void cleanup(register struct mproc *rmp);
+ 
++static int lookup_magic;
++static endpoint_t ipc_ep;
++
++static int minix_rs_lookup(const char *name)
++{
++    if (lookup_magic != 13)
++    {
++    message m;
++    size_t len_key;
++    len_key = strlen(name)+1;
++    m.RS_NAME = (char *) name;
++    m.RS_NAME_LEN = len_key;
++    lookup_magic = 13;
++    if (_syscall(RS_PROC_NR, RS_LOOKUP, &m) != -1) {
++	ipc_ep = m.RS_ENDPOINT;
++	return OK;
++    }
++    return -1;
++    }
++    return OK;
++}
++
++static void fork_notify_pm(int sem_set)
++{
++#ifdef PROC_DEBUG
++    printf("FORK::notify sem_set %d\n", sem_set);
++#endif
++    message mipc;
++    mipc.PROC_ENTER_KEY = sem_set;
++    minix_rs_lookup("ipc");
++    _syscall(ipc_ep, IPC_PROC_ENTER, &mipc);
++}
++
++static void exit_notify_pm(int endp, int sem_set)
++{
++#ifdef PROC_DEBUG
++    printf("EXIT:notify endp: %d, sem_set %d\n", endp, sem_set);
++#endif
++    message mipc;
++    mipc.PROC_LEAVE_KEY = sem_set;
++    mipc.PROC_LEAVE_ENDPOINT = endp;
++    minix_rs_lookup("ipc");
++    _syscall(ipc_ep, IPC_PROC_LEAVE, &mipc);
++}
++
+ /*===========================================================================*
+  *				do_fork					     *
+  *===========================================================================*/
+@@ -121,6 +171,10 @@ int do_fork()
+   m.PM_REGID = -1;	/* Not used by PM_FORK */
+ 
+   tell_vfs(rmc, &m);
++#ifdef PROC_CLEANUP
++  if (rmc->mp_proc_sem_set >= 0)
++      fork_notify_pm(rmc->mp_proc_sem_set);
++#endif
+ 
+ #if USE_TRACE
+   /* Tell the tracer, if any, about the new child */
+@@ -293,6 +347,10 @@ int dump_core;			/* flag indicating whether to dump core */
+   p_mp = &mproc[rmp->mp_parent];			/* process' parent */
+   p_mp->mp_child_utime += user_time + rmp->mp_child_utime; /* add user time */
+   p_mp->mp_child_stime += sys_time + rmp->mp_child_stime; /* add system time */
++#ifdef PROC_CLEANUP
++  if (rmp->mp_proc_sem_set != -1)
++      exit_notify_pm(rmp->mp_endpoint, rmp->mp_proc_sem_set);
++#endif
+ 
+   /* Tell the kernel the process is no longer runnable to prevent it from 
+    * being scheduled in between the following steps. Then tell VFS that it 
+diff --git a/servers/pm/getset.c b/servers/pm/getset.c
+index 5354339..1a8a9e3 100644
+--- a/servers/pm/getset.c
++++ b/servers/pm/getset.c
+@@ -13,6 +13,23 @@
+ #include "mproc.h"
+ #include "param.h"
+ 
++int do_semid()
++{
++    	int proc = m_in.m1_i1;
++	int val = m_in.m1_i2;
++
++	int mproc_sem_set = mproc[_ENDPOINT_P(proc)].mp_proc_sem_set;
++
++	if (val >= 0)
++	{ 
++		mproc[_ENDPOINT_P(proc)].mp_proc_sem_set = val;
++	}
++
++	mp->mp_reply.m1_i1 = mproc_sem_set;
++
++	return (OK);
++}
++
+ /*===========================================================================*
+  *				do_get					     *
+  *===========================================================================*/
+diff --git a/servers/pm/main.c b/servers/pm/main.c
+index d3c50f2..6c498ea 100644
+--- a/servers/pm/main.c
++++ b/servers/pm/main.c
+@@ -198,6 +198,7 @@ static int sef_cb_init_fresh(int UNUSED(type), sef_init_info_t *UNUSED(info))
+   for (rmp=&mproc[0]; rmp<&mproc[NR_PROCS]; rmp++) {
+ 	init_timer(&rmp->mp_timer);
+ 	rmp->mp_magic = MP_MAGIC;
++	rmp->mp_proc_sem_set = -1; 
+   }
+ 
+   /* Build the set of signals which cause core dumps, and the set of signals
+diff --git a/servers/pm/mproc.h b/servers/pm/mproc.h
+index 80afb4e..1d54aee 100644
+--- a/servers/pm/mproc.h
++++ b/servers/pm/mproc.h
+@@ -23,6 +23,8 @@ EXTERN struct mproc {
+   int mp_parent;		/* index of parent process */
+   int mp_tracer;		/* index of tracer process, or NO_TRACER */
+ 
++  int mp_proc_sem_set;
++
+   /* Child user and system times. Accounting done on child exit. */
+   clock_t mp_child_utime;	/* cumulative user time of children */
+   clock_t mp_child_stime;	/* cumulative sys time of children */
+diff --git a/servers/pm/proto.h b/servers/pm/proto.h
+index 00646d3..583552d 100644
+--- a/servers/pm/proto.h
++++ b/servers/pm/proto.h
+@@ -34,6 +34,7 @@ int wait_test(struct mproc *rmp, struct mproc *child);
+ /* getset.c */
+ int do_get(void);
+ int do_set(void);
++int do_semid(void);
+ 
+ /* main.c */
+ int main(void);
+diff --git a/servers/pm/table.c b/servers/pm/table.c
+index 5051cec..c17674f 100644
+--- a/servers/pm/table.c
++++ b/servers/pm/table.c
+@@ -80,7 +80,7 @@ int (*call_vec[])(void) = {
+ 	do_set, 	/* 66 = setgroups */
+ 	do_getmcontext,	/* 67 = getmcontext */
+ 	do_setmcontext,	/* 68 = setmcontext */
+-	no_sys,		/* 69 = unused	*/
++	do_semid,	/* 69 = proc_semid */
+ 	no_sys,		/* 70 = unused	*/
+ 	do_sigaction,	/* 71 = sigaction   */
+ 	do_sigsuspend,	/* 72 = sigsuspend  */
+-- 
+1.7.7
+
+
+From f400f5e10bf19e98dbb9b564cfff6e0d69cd912b Mon Sep 17 00:00:00 2001
+From: Piotr Szulc <kkragoth@gmail.com>
+Date: Mon, 18 Jan 2016 19:52:56 +0000
+Subject: [PATCH 2/6] Makefile w include
+
+---
+ include/Makefile |    2 ++
+ 1 files changed, 2 insertions(+), 0 deletions(-)
+
+diff --git a/include/Makefile b/include/Makefile
+index b9f00bb..4ef637f 100644
+--- a/include/Makefile
++++ b/include/Makefile
+@@ -29,6 +29,8 @@ INCS+=	protocols/dumprestore.h protocols/routed.h protocols/rwhod.h \
+ 
+ INCS+=	hesiod.h
+ 
++INCS+= proc_sem.h
++
+ INCS+=	rpcsvc/yp_prot.h rpcsvc/ypclnt.h
+ 
+ INCS+=  ssp/ssp.h ssp/stdio.h ssp/string.h ssp/strings.h ssp/unistd.h
+-- 
+1.7.7
+
+
+From 43261457b73e33c771645aba5dd1117f8617e049 Mon Sep 17 00:00:00 2001
+From: Piotr Szulc <kkragoth@gmail.com>
+Date: Mon, 18 Jan 2016 20:47:15 +0000
+Subject: [PATCH 3/6] Makefile
+
+---
+ servers/pm/Makefile |    4 ++++
+ 1 files changed, 4 insertions(+), 0 deletions(-)
+
+diff --git a/servers/pm/Makefile b/servers/pm/Makefile
+index 9065432..932c62e 100644
+--- a/servers/pm/Makefile
++++ b/servers/pm/Makefile
+@@ -28,4 +28,8 @@ CPPFLAGS.misc.c+=	-I${NETBSDSRCDIR}
+ CPPFLAGS.schedule.c+=	-I${NETBSDSRCDIR}
+ CPPFLAGS.utility.c+=	-I${NETBSDSRCDIR}
+ 
++.PHONY: clean
++
++clean:
++	rm -f pm *.o
+ .include <minix.bootprog.mk>
+-- 
+1.7.7
+
+
+From 40db5e9b10a92dc46406de6dd1ddb3523cfe202d Mon Sep 17 00:00:00 2001
+From: Piotr Szulc <kkragoth@gmail.com>
+Date: Mon, 18 Jan 2016 21:09:55 +0000
+Subject: [PATCH 4/6] all clean
+
+---
+ servers/Makefile    |    1 +
+ servers/pm/Makefile |    2 ++
+ 2 files changed, 3 insertions(+), 0 deletions(-)
+
+diff --git a/servers/Makefile b/servers/Makefile
+index 6297edc..fe6d8ac 100644
+--- a/servers/Makefile
++++ b/servers/Makefile
+@@ -1,3 +1,4 @@
++all: clean
+ # Makefile for all system servers.
+ #
+ 
+diff --git a/servers/pm/Makefile b/servers/pm/Makefile
+index 932c62e..1ed98e5 100644
+--- a/servers/pm/Makefile
++++ b/servers/pm/Makefile
+@@ -1,5 +1,7 @@
++all: clean
+ .include <bsd.own.mk>
+ 
++
+ # Makefile for Process Manager (PM)
+ PROG=	pm
+ SRCS=	main.c forkexit.c break.c exec.c time.c alarm.c \
+-- 
+1.7.7
+
+
+From 5f86717a9ecfe4638c667865370853e05a6f088e Mon Sep 17 00:00:00 2001
+From: Piotr Szulc <kkragoth@gmail.com>
+Date: Mon, 18 Jan 2016 21:20:02 +0000
+Subject: [PATCH 5/6] znowutemejkfajle
+
+---
+ servers/pm/Makefile |    4 ----
+ 1 files changed, 0 insertions(+), 4 deletions(-)
+
+diff --git a/servers/pm/Makefile b/servers/pm/Makefile
+index 1ed98e5..cf1a094 100644
+--- a/servers/pm/Makefile
++++ b/servers/pm/Makefile
+@@ -30,8 +30,4 @@ CPPFLAGS.misc.c+=	-I${NETBSDSRCDIR}
+ CPPFLAGS.schedule.c+=	-I${NETBSDSRCDIR}
+ CPPFLAGS.utility.c+=	-I${NETBSDSRCDIR}
+ 
+-.PHONY: clean
+-
+-clean:
+-	rm -f pm *.o
+ .include <minix.bootprog.mk>
+-- 
+1.7.7
+
+
+From 3737915a51fa163fb689cba80870d458c56a2808 Mon Sep 17 00:00:00 2001
+From: Piotr Szulc <kkragoth@gmail.com>
+Date: Mon, 18 Jan 2016 23:43:47 +0000
+Subject: [PATCH 6/6] Maybe Works
+
+---
+ include/minix/com.h           |    3 ++
+ lib/libc/sys-minix/proc_sem.c |   45 +++++++++++++++++++++++++++++-----------
+ servers/ipc/proc_sem.c        |   40 ++++-------------------------------
+ servers/pm/getset.c           |    6 ++--
+ 4 files changed, 43 insertions(+), 51 deletions(-)
+
+diff --git a/include/minix/com.h b/include/minix/com.h
+index 0abf43f..ee39787 100644
+--- a/include/minix/com.h
++++ b/include/minix/com.h
+@@ -1129,10 +1129,13 @@
+ #	define SEMOP_SIZE	m2_i2
+ #define IPC_PROC_SEMINIT (IPC_BASE+8)
+ #       define PROC_SEMINIT_KEY m2_i1
++#	define PROC_SEMINIT_SET m2_i2
+ #define IPC_PROC_SEMPOST (IPC_BASE+9)
+ #       define PROC_SEMPOST_KEY m2_i1
++#	define PROC_SEMPOST_SET m2_i2
+ #define IPC_PROC_SEMWAIT (IPC_BASE+10)
+ #       define PROC_SEMWAIT_KEY m2_i1
++#	define PROC_SEMWAIT_SET m2_i2
+ #define IPC_PROC_ENTER 	(IPC_BASE+11)
+ #	define PROC_ENTER_KEY m2_i1
+ #define IPC_PROC_LEAVE	(IPC_BASE+12)
+diff --git a/lib/libc/sys-minix/proc_sem.c b/lib/libc/sys-minix/proc_sem.c
+index e86b11a..16d5462 100644
+--- a/lib/libc/sys-minix/proc_sem.c
++++ b/lib/libc/sys-minix/proc_sem.c
+@@ -21,6 +21,13 @@ static int get_ipc_endpt(endpoint_t *pt)
+ 
+ int proc_sem_init(size_t n) 
+ {
++	message mpm;
++	mpm.m1_i1 = mpm.m_source;
++	mpm.m1_i2 = -1;
++	endpoint_t pm_ep;
++	minix_rs_lookup("pm", &pm_ep);
++	_syscall(pm_ep, 69, &mpm);
++
+ 	message m;
+ 	endpoint_t ipc_pt;
+ 
+@@ -31,36 +38,48 @@ int proc_sem_init(size_t n)
+ 	}
+ 
+ 	m.PROC_SEMINIT_KEY = n;
++	m.PROC_SEMINIT_SET = mpm.m1_i1;
++
++	int k = (_syscall(ipc_pt, IPC_PROC_SEMINIT, &m));
+ 
+-	return (_syscall(ipc_pt, IPC_PROC_SEMINIT, &m));
++	message mpm2;
++	mpm2.m1_i1 = mpm2.m_source;
++	mpm2.m1_i2 = m.PROC_SEMINIT_SET;
++	_syscall(pm_ep, 69, &mpm2);
++
++	return k;
+ }
+ 
+ void proc_sem_post(size_t sem_nr) 
+ {
++	message mpm;
++	mpm.m1_i1 = mpm.m_source;
++	mpm.m1_i2 = -1;
++	endpoint_t pm_ep;
++	minix_rs_lookup("pm", &pm_ep);
++	_syscall(pm_ep, 69, &mpm);
++
+ 	message m;
+ 	endpoint_t ipc_pt;
+-
+-/*
+-	if (get_ipc_endpt(&ipc_pt) != OK)
+-	{
+-	    	errno = ENOSYS;
+-	  	return -1;
+-	}
+-*/
+ 	get_ipc_endpt(&ipc_pt);
+ 	m.PROC_SEMPOST_KEY = sem_nr;
+-
++	m.PROC_SEMPOST_SET = mpm.m1_i1;
+ 	_syscall(ipc_pt, IPC_PROC_SEMPOST, &m);
+ }
+ 
+ void proc_sem_wait(size_t sem_nr) 
+ {
++	message mpm;
++	mpm.m1_i1 = mpm.m_source;
++	mpm.m1_i2 = -1;
++	endpoint_t pm_ep;
++	minix_rs_lookup("pm", &pm_ep);
++	_syscall(pm_ep, 69, &mpm);
++
+ 	message m;
+ 	endpoint_t ipc_pt;
+-
+-
+ 	get_ipc_endpt(&ipc_pt);
+ 	m.PROC_SEMWAIT_KEY = sem_nr;
+-
++	m.PROC_SEMWAIT_SET = mpm.m1_i1;
+ 	_syscall(ipc_pt, IPC_PROC_SEMWAIT, &m);
+ }
+diff --git a/servers/ipc/proc_sem.c b/servers/ipc/proc_sem.c
+index acdb06f..47124b4 100644
+--- a/servers/ipc/proc_sem.c
++++ b/servers/ipc/proc_sem.c
+@@ -40,37 +40,6 @@ struct proc_sem_set {
+ 
+ static struct proc_sem_set proc_sem_list[PROC_SEM_SETS];
+ 
+-static int minix_rs_lookup(const char *name, endpoint_t *value)
+-{
+-        message m;
+-        size_t len_key;
+-
+-        len_key = strlen(name)+1;
+-
+-        m.RS_NAME = (char *) name;
+-        m.RS_NAME_LEN = len_key;
+-
+-        if (_syscall(RS_PROC_NR, RS_LOOKUP, &m) != -1) {
+-                *value = m.RS_ENDPOINT;
+-                return OK;
+-        }
+-
+-        return -1;
+-}
+-
+-/* set_id == -1 doesnt change process set id */
+-static int resolve_set_id(int source, int sem_set_id)
+-{
+-        message mpm;
+-        mpm.m1_i1 = source;
+-        mpm.m1_i2 = sem_set_id;
+-        endpoint_t pm_ep;
+-        minix_rs_lookup("pm", &pm_ep);
+-        _syscall(pm_ep, 69, &mpm);
+-
+-        return mpm.m1_i1;
+-}
+-
+ int do_proc_enter(message *m)
+ {
+         int sem_set_id = m->PROC_ENTER_KEY;
+@@ -126,13 +95,14 @@ int do_proc_seminit(message *m)
+                         break;
+         }
+ 
+-        int previous = resolve_set_id(m->m_source, sem_set_id);
+-
++        int previous = m->PROC_SEMINIT_SET;
+         if (previous != -1)
+         {
+                 proc_sem_list[previous].proc_using--;
+         }
+ 
++	m->PROC_SEMINIT_SET = sem_set_id;
++
+         proc_sem_list[sem_set_id].proc_using = 1;
+         proc_sem_list[sem_set_id].sem_count = m->PROC_SEMINIT_KEY;
+ 
+@@ -157,7 +127,7 @@ int do_proc_sempost(message *m)
+         printf("PROC_SEM::post\n");
+ #endif
+ 
+-        int sem_set_id = resolve_set_id(m->m_source, -1);
++        int sem_set_id = m->PROC_SEMPOST_SET;
+         int sem_id = m->PROC_SEMPOST_KEY;
+ 
+         if ((sem_id < 0) || (sem_id >= proc_sem_list[sem_set_id].sem_count))
+@@ -207,7 +177,7 @@ int do_proc_semwait(message *m)
+         printf("PROC_SEM::wait\n");
+ #endif
+ 
+-        int sem_set_id = resolve_set_id(m->m_source, -1);
++        int sem_set_id = m->PROC_SEMWAIT_SET;
+         int sem_id = m->PROC_SEMWAIT_KEY;
+ 
+         if ((sem_id < 0) || (sem_id >= proc_sem_list[sem_set_id].sem_count))
+diff --git a/servers/pm/getset.c b/servers/pm/getset.c
+index 1a8a9e3..ae22982 100644
+--- a/servers/pm/getset.c
++++ b/servers/pm/getset.c
+@@ -15,14 +15,14 @@
+ 
+ int do_semid()
+ {
+-    	int proc = m_in.m1_i1;
++    	/*int proc = m_in.m1_i1;*/
+ 	int val = m_in.m1_i2;
+ 
+-	int mproc_sem_set = mproc[_ENDPOINT_P(proc)].mp_proc_sem_set;
++	int mproc_sem_set = mproc[_ENDPOINT_P(who_e)].mp_proc_sem_set;
+ 
+ 	if (val >= 0)
+ 	{ 
+-		mproc[_ENDPOINT_P(proc)].mp_proc_sem_set = val;
++		mproc[_ENDPOINT_P(who_e)].mp_proc_sem_set = val;
+ 	}
+ 
+ 	mp->mp_reply.m1_i1 = mproc_sem_set;
+-- 
+1.7.7
+
